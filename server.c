@@ -38,9 +38,9 @@ void queueRemove(Queue* queue, int index)
 {
     int current = -1; 
     Node* tmp = queue->head;
-    if(queue_capacity==0)
+    if(queue->size==0)
         return;
-    while(current+1!=index)
+    while((current+1)!=index)
     {
         ++current; 
         tmp = tmp->next; 
@@ -51,11 +51,12 @@ void queueRemove(Queue* queue, int index)
 }
 
 
-Node* getNodeByTID(pid_t tid)
+Node* getNodeByCurrentThread()
 {
+    pthread_t t=pthread_self();
     for (int i=0; i<numOfThreads; i++)
     {
-        if (threadPool[i].tid==tid)
+        if (pthread_equal(t, threadPool[i].thread))
             return threadPool[i].currentRequest;
     }
     return NULL;
@@ -82,6 +83,7 @@ int handleOverload(Queue* waitingQueue)
             Node* head=dummy->next;
             dummy->next=head->next;
             free(head);
+            waitingQueue->size--;
             return 1;
         }
     }
@@ -102,7 +104,7 @@ int handleOverload(Queue* waitingQueue)
     else if (waitingQueue->policy==randomPolicy)
     {
         srand((unsigned) time(NULL));
-        int num_to_delete=(waitingQueue->size+1)/2;
+        int num_to_delete=((waitingQueue->size)+1)/2;
         for (int i=0; i<num_to_delete; i++)
         {
             int res=rand() % (waitingQueue->size);
@@ -126,7 +128,7 @@ void enqueue(Queue* waitingQueue, int item)
 
     if (result==0) {
         Close(item);
-        pthread_cond_signal(&cond);
+        //pthread_cond_signal(&cond);
         pthread_mutex_unlock(&lock);
         return;
     }
@@ -192,7 +194,6 @@ void getargs(int *port, int* sizeOfQueue, Policy* policy, int* dynamicSize, int 
 void* thread_handle_request(void* ptr)
 {
     int index=*((int*)ptr);
-    threadPool[index].tid=gettid();
     while(1)
     {
         Node* n=dequeue(waitingQueue);
@@ -207,8 +208,10 @@ void* thread_handle_request(void* ptr)
         Close(connfd);
         free(n);
         threadPool[index].currentRequest = NULL;
+        pthread_mutex_lock(&lock);
         currently_running--;
         pthread_cond_signal(&blockcond);
+        pthread_mutex_unlock(&lock);
     }
     return NULL;
 }

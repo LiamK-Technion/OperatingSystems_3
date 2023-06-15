@@ -34,13 +34,12 @@ void enqueue(Queue* waitingQueue, int item);
 Node* dequeue(Queue* waitingQueue);
 void initQueue(Queue* queue);
 void queueRemove(Queue* queue, int index);
-Node* getNodeByTID(pid_t tid);
+Node* getNodeByCurrentThread();
 
 /* ----------- STATISTICS STUFF ------------*/ 
 typedef struct ThreadStat{
     pthread_t thread;
     int index;
-    pid_t tid;
     Node* currentRequest;
     int requestCounter;
     int dynamicCounter;

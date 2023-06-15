@@ -5,6 +5,8 @@
 #include "segel.h"
 #include "request.h"
 
+void printStatistics(char* buf, int fd);
+
 // requestError(      fd,    filename,        "404",    "Not found", "OS-HW3 Server could not find this file");
 void requestError(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) 
 {
@@ -20,24 +22,24 @@ void requestError(int fd, char *cause, char *errnum, char *shortmsg, char *longm
    // Write out the header information for this response
    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
    Rio_writen(fd, buf, strlen(buf));
-   printf("%s", buf);
+   //printf("%s", buf);
 
    sprintf(buf, "Content-Type: text/html\r\n");
    Rio_writen(fd, buf, strlen(buf));
-   printf("%s", buf);
+   //printf("%s", buf);
 
    sprintf(buf, "Content-Length: %lu\r\n\r\n", strlen(body));
    Rio_writen(fd, buf, strlen(buf));
-   printf("%s", buf);
+   //printf("%s", buf);
    
    char buf2[MAXLINE]="";
    printStatistics(buf2, fd);
    Rio_writen(fd, buf2, strlen(buf2));
-   printf("%s", buf2);
+   //printf("%s", buf2);
 
    // Write out the content
    Rio_writen(fd, body, strlen(body));
-   printf("%s", body);
+   //printf("%s", body);
 
 }
 
@@ -109,7 +111,7 @@ void requestGetFiletype(char *filename, char *filetype)
 void requestServeDynamic(int fd, char *filename, char *cgiargs)
 {
    for(int i=0; i<numOfThreads; ++i){
-      if(threadPool[i].tid==gettid())
+      if(pthread_equal(pthread_self(), threadPool[i].thread))
          threadPool[i].dynamicCounter++;
    }
    char buf[MAXLINE], *emptylist[] = {NULL};
@@ -136,7 +138,7 @@ void requestServeDynamic(int fd, char *filename, char *cgiargs)
 void requestServeStatic(int fd, char *filename, int filesize) 
 {
    for(int i=0; i<numOfThreads; ++i){
-      if(threadPool[i].tid==gettid())
+      if(pthread_equal(pthread_self(), threadPool[i].thread))
          threadPool[i].staticCounter++;
    }
    int srcfd;
@@ -180,7 +182,7 @@ void requestHandle(int fd)
    Rio_readlineb(&rio, buf, MAXLINE);
    sscanf(buf, "%s %s %s", method, uri, version);
 
-   printf("%s %s %s\n", method, uri, version);
+   //printf("%s %s %s\n", method, uri, version);
 
    if (strcasecmp(method, "GET")) {
       requestError(fd, method, "501", "Not Implemented", "OS-HW3 Server does not implement this method");
@@ -211,18 +213,17 @@ void requestHandle(int fd)
 
 void printStatistics(char* buf, int fd)
 {
-   Node* node=getNodeByTID(gettid());
+   Node* node=getNodeByCurrentThread();
    int index=-1, count=-1, dynamic=-1, statychan=-1;
    for (int i=0; i<numOfThreads; i++)
    {
-      if (threadPool[i].tid==gettid())
+      if (pthread_equal(pthread_self(), threadPool[i].thread))
       {
          index=i;
          count=threadPool[i].requestCounter;
          dynamic=threadPool[i].dynamicCounter;
          statychan=threadPool[i].staticCounter;
       }
-
    }
 
    struct timeval diff;
