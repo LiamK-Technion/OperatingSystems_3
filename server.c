@@ -47,6 +47,7 @@ void queueRemove(Queue* queue, int index)
     }
     Node* to_del = tmp->next;
     tmp->next = to_del->next;
+    Close(to_del->request);
     free(to_del);
 }
 
@@ -82,9 +83,13 @@ int handleOverload(Queue* waitingQueue)
             Node* dummy=waitingQueue->head;
             Node* head=dummy->next;
             dummy->next=head->next;
+            Close(head->request);
             free(head);
             waitingQueue->size--;
             return 1;
+        }
+        else{
+            return 0;
         }
     }
     else if (waitingQueue->policy==bf)
