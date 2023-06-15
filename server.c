@@ -11,52 +11,54 @@
 // Most of the work is done within routines written in request.c
 //
 
-pthread_cond_t cond;
-pthread_mutex_t lock;
+extern int queue_capacity;
+extern int currently_running;
 
-pthread_cond_t blockcond;
-//pthread_mutex_t blocklock;
-
-int queue_capacity=0;
-int currently_running=0;
-
-/* ----------- QUEUE STUFF ------------*/ 
-// Queue Policy
-typedef enum Policy {block, dt, dh, bf, dynamic, randomPolicy} Policy;
-
-typedef struct Node{
-    struct Node* next;
-    void* request;
-} Node;
-
-typedef struct Queue{
-    Node* head;
-    int size;
-    Policy policy;
-    int dynamicSize;
-} Queue;
-
-
-Node* createNode(void* item);
-void enqueue(Queue* waitingQueue, void* item);
-Node* dequeue(Queue* waitingQueue);
-void initQueue(Queue* queue);
-
-Node* createNode(void* item)
+Node* createNode(int item, struct timeval arrivalTime)
 {
     Node* node=malloc(sizeof(Node));
     if (!node)
         return NULL;
     node->request=item;
     node->next=NULL;
+    node->arrivalTime=arrivalTime;
     return node;
 }
 
 void initQueue(Queue* queue)
 {
-    Node* node=createNode(NULL);
+    struct timeval arrivalTime;
+    gettimeofday(&arrivalTime, NULL); 
+    Node* node=createNode(0, arrivalTime);
     queue->head=node;
     queue->size=0;
+}
+
+void queueRemove(Queue* queue, int index)
+{
+    int current = -1; 
+    Node* tmp = queue->head;
+    if(queue_capacity==0)
+        return;
+    while(current+1!=index)
+    {
+        ++current; 
+        tmp = tmp->next; 
+    }
+    Node* to_del = tmp->next;
+    tmp->next = to_del->next;
+    free(to_del);
+}
+
+
+Node* getNodeByTID(pid_t tid)
+{
+    for (int i=0; i<numOfThreads; i++)
+    {
+        if (threadPool[i].tid==tid)
+            return threadPool[i].currentRequest;
+    }
+    return NULL;
 }
 
 // Returns 1 if continue with the request, 0 if drop it
@@ -85,29 +87,45 @@ int handleOverload(Queue* waitingQueue)
     }
     else if (waitingQueue->policy==bf)
     {
-        
+        while (waitingQueue->size + currently_running > 0)
+            pthread_cond_wait(&blockcond, &lock);
+        return 0;
     }
     else if (waitingQueue->policy==dynamic)
     {
-        
+        if (queue_capacity==waitingQueue->dynamicSize) {
+            return 0;
+        }
+        queue_capacity++;
+        return 0;
     }
     else if (waitingQueue->policy==randomPolicy)
     {
-        
+        srand((unsigned) time(NULL));
+        int num_to_delete=(waitingQueue->size+1)/2;
+        for (int i=0; i<num_to_delete; i++)
+        {
+            int res=rand() % (waitingQueue->size);
+            queueRemove(waitingQueue, res);
+            waitingQueue->size--;
+        }
+        return 1;
     }
-    return 0;
+    return 1;
 }
 
 // Not implemented policies. If the queue is full, drop the requests
-void enqueue(Queue* waitingQueue, void* item)
+void enqueue(Queue* waitingQueue, int item)
 {
+    struct timeval arrivalTime;
+    gettimeofday(&arrivalTime, NULL); 
     pthread_mutex_lock(&lock);
-    int result;
+    int result=1;
     if (waitingQueue->size + currently_running >= queue_capacity)
         result=handleOverload(waitingQueue);
 
     if (result==0) {
-        Close(*(int*)item);
+        Close(item);
         pthread_cond_signal(&cond);
         pthread_mutex_unlock(&lock);
         return;
@@ -116,7 +134,7 @@ void enqueue(Queue* waitingQueue, void* item)
     Node* last=waitingQueue->head;
     while (last->next!=NULL)
         last=last->next;
-    last->next=createNode(item);
+    last->next=createNode(item, arrivalTime);
     waitingQueue->size++;
     pthread_cond_signal(&cond);
     pthread_mutex_unlock(&lock);
@@ -125,7 +143,6 @@ void enqueue(Queue* waitingQueue, void* item)
 Node* dequeue(Queue* waitingQueue)
 {
     pthread_mutex_lock(&lock);
-
     while(waitingQueue->size==0) {
         pthread_cond_wait(&cond, &lock);
     }
@@ -135,20 +152,18 @@ Node* dequeue(Queue* waitingQueue)
     dummy->next=head->next;
     waitingQueue->size--;
     currently_running++;
-    //pthread_cond_signal(&block);
-
     pthread_mutex_unlock(&lock);
     return head;
 }
 
-void getargs(int *port, int* numOfThreads, int* sizeOfQueue, Policy* policy, int* dynamicSize, int argc, char *argv[])
+void getargs(int *port, int* sizeOfQueue, Policy* policy, int* dynamicSize, int argc, char *argv[])
 {
     if (argc < 5) {
         fprintf(stderr, "Usage: %s <port> <threads> <queue> <schedule> \n", argv[0]);
         exit(1);
     }
     *port = atoi(argv[1]);
-    *numOfThreads = atoi(argv[2]);
+    numOfThreads = atoi(argv[2]);
     *sizeOfQueue = atoi(argv[3]);
     if (strcmp(argv[4], "block")==0)
         *policy=block;
@@ -176,14 +191,22 @@ void getargs(int *port, int* numOfThreads, int* sizeOfQueue, Policy* policy, int
 
 void* thread_handle_request(void* ptr)
 {
-    Queue* queue=(Queue*) ptr;
+    int index=*((int*)ptr);
+    threadPool[index].tid=gettid();
     while(1)
     {
-        Node* n=dequeue(queue);
-        int connfd=*(int*)(n->request);
+        Node* n=dequeue(waitingQueue);
+        int connfd=n->request;
+        struct timeval currenttime;
+        gettimeofday(&currenttime, NULL); 
+        n->dispatchTime=currenttime;
+        threadPool[index].requestCounter++;
+        threadPool[index].currentRequest = n;
+
         requestHandle(connfd);
         Close(connfd);
         free(n);
+        threadPool[index].currentRequest = NULL;
         currently_running--;
         pthread_cond_signal(&blockcond);
     }
@@ -192,11 +215,11 @@ void* thread_handle_request(void* ptr)
 
 int main(int argc, char *argv[])
 {
-    int listenfd, connfd, port, clientlen, numOfThreads, sizeOfQueue, dynamicSize=0;
+    int listenfd, connfd, port, clientlen, sizeOfQueue, dynamicSize=0;
     Policy policy;
     struct sockaddr_in clientaddr;
 
-    getargs(&port, &numOfThreads, &sizeOfQueue, &policy, &dynamicSize, argc, argv);
+    getargs(&port, &sizeOfQueue, &policy, &dynamicSize, argc, argv);
     if (sizeOfQueue<=0 || numOfThreads<=0)
     {
         fprintf(stderr, "Invalid arguments\n");
@@ -207,7 +230,7 @@ int main(int argc, char *argv[])
     pthread_cond_init(&cond, NULL);
     pthread_cond_init(&blockcond, NULL);
     pthread_mutex_init(&lock, NULL);
-    Queue* waitingQueue=malloc(sizeof(Queue));
+    waitingQueue=malloc(sizeof(Queue));
     if(!waitingQueue)
         return -1;
 
@@ -215,24 +238,33 @@ int main(int argc, char *argv[])
     waitingQueue->policy=policy;
     waitingQueue->dynamicSize=dynamicSize;
 
-    pthread_t* threadPool=malloc(numOfThreads*sizeof(pthread_t));
+    //pthread_t* threadPool=malloc(numOfThreads*sizeof(pthread_t));
+    threadPool=malloc(numOfThreads*sizeof(ThreadStat));
+    if(!threadPool){
+        free(waitingQueue);
+        return -1;
+    }
+    int* indexes = malloc(numOfThreads*sizeof(int));
+    if(!indexes){
+        free(threadPool);
+        free(waitingQueue);
+        return -1;
+    }
+    
     for (int i=0; i<numOfThreads; i++) {
-        pthread_create(&threadPool[i], NULL, thread_handle_request, (void*)waitingQueue);
+        indexes[i]=i;
+        threadPool[i].index = i;
+        threadPool[i].dynamicCounter = 0;
+        threadPool[i].requestCounter = 0;
+        threadPool[i].staticCounter = 0;
+        threadPool[i].currentRequest = NULL;
+        pthread_create(&(threadPool[i].thread), NULL, thread_handle_request, (void*)&indexes[i]);
     }
 
     listenfd = Open_listenfd(port);
     while (1) {
         clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
-
-        enqueue(waitingQueue, &connfd);
-        //requestHandle(connfd);
-        //Close(connfd);
+        enqueue(waitingQueue, connfd);
     }
 }
-
-
-    
-
-
- 

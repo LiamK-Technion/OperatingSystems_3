@@ -29,6 +29,11 @@ void requestError(int fd, char *cause, char *errnum, char *shortmsg, char *longm
    sprintf(buf, "Content-Length: %lu\r\n\r\n", strlen(body));
    Rio_writen(fd, buf, strlen(buf));
    printf("%s", buf);
+   
+   char buf2[MAXLINE]="";
+   printStatistics(buf2, fd);
+   Rio_writen(fd, buf2, strlen(buf2));
+   printf("%s", buf2);
 
    // Write out the content
    Rio_writen(fd, body, strlen(body));
@@ -103,12 +108,17 @@ void requestGetFiletype(char *filename, char *filetype)
 
 void requestServeDynamic(int fd, char *filename, char *cgiargs)
 {
+   for(int i=0; i<numOfThreads; ++i){
+      if(threadPool[i].tid==gettid())
+         threadPool[i].dynamicCounter++;
+   }
    char buf[MAXLINE], *emptylist[] = {NULL};
 
    // The server does only a little bit of the header.  
    // The CGI script has to finish writing out the header.
    sprintf(buf, "HTTP/1.0 200 OK\r\n");
    sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
+   printStatistics(buf, fd);
 
    Rio_writen(fd, buf, strlen(buf));
 
@@ -125,6 +135,10 @@ void requestServeDynamic(int fd, char *filename, char *cgiargs)
 
 void requestServeStatic(int fd, char *filename, int filesize) 
 {
+   for(int i=0; i<numOfThreads; ++i){
+      if(threadPool[i].tid==gettid())
+         threadPool[i].staticCounter++;
+   }
    int srcfd;
    char *srcp, filetype[MAXLINE], buf[MAXBUF];
 
@@ -141,8 +155,9 @@ void requestServeStatic(int fd, char *filename, int filesize)
    sprintf(buf, "HTTP/1.0 200 OK\r\n");
    sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
    sprintf(buf, "%sContent-Length: %d\r\n", buf, filesize);
-   sprintf(buf, "%sContent-Type: %s\r\n\r\n", buf, filetype);
-
+   sprintf(buf, "%sContent-Type: %s\r\n", buf, filetype);
+   printStatistics(buf, fd);
+   sprintf(buf, "%s\r\n", buf);
    Rio_writen(fd, buf, strlen(buf));
 
    //  Writes out to the client socket the memory-mapped file 
@@ -194,4 +209,29 @@ void requestHandle(int fd)
    }
 }
 
+void printStatistics(char* buf, int fd)
+{
+   Node* node=getNodeByTID(gettid());
+   int index=-1, count=-1, dynamic=-1, statychan=-1;
+   for (int i=0; i<numOfThreads; i++)
+   {
+      if (threadPool[i].tid==gettid())
+      {
+         index=i;
+         count=threadPool[i].requestCounter;
+         dynamic=threadPool[i].dynamicCounter;
+         statychan=threadPool[i].staticCounter;
+      }
 
+   }
+
+   struct timeval diff;
+   timersub(&(node->dispatchTime), &(node->arrivalTime), &diff);
+
+   sprintf(buf, "%sStat-Req-Arrival:: %lu.%06lu\r\n", buf, node->arrivalTime.tv_sec, node->arrivalTime.tv_usec);
+   sprintf(buf, "%sStat-Req-Dispatch:: %lu.%06lu\r\n", buf, diff.tv_sec, diff.tv_usec);
+   sprintf(buf, "%sStat-Thread-Id:: %d\r\n", buf, index);
+   sprintf(buf, "%sStat-Thread-Count:: %d\r\n", buf, count);
+   sprintf(buf, "%sStat-Thread-Static:: %d\r\n", buf, statychan);
+   sprintf(buf, "%sStat-Thread-Dynamic:: %d\r\n", buf, dynamic);
+}
