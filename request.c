@@ -28,12 +28,13 @@ void requestError(int fd, char *cause, char *errnum, char *shortmsg, char *longm
    Rio_writen(fd, buf, strlen(buf));
    //printf("%s", buf);
 
-   sprintf(buf, "Content-Length: %lu\r\n\r\n", strlen(body));
+   sprintf(buf, "Content-Length: %lu\r\n", strlen(body));
    Rio_writen(fd, buf, strlen(buf));
    //printf("%s", buf);
    
    char buf2[MAXLINE]="";
    printStatistics(buf2, fd);
+   sprintf(buf2, "%s\r\n", buf2);
    Rio_writen(fd, buf2, strlen(buf2));
    //printf("%s", buf2);
 
