@@ -22,25 +22,25 @@ void requestError(int fd, char *cause, char *errnum, char *shortmsg, char *longm
    // Write out the header information for this response
    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
    Rio_writen(fd, buf, strlen(buf));
-   //printf("%s", buf);
+   printf("%s", buf);
 
    sprintf(buf, "Content-Type: text/html\r\n");
    Rio_writen(fd, buf, strlen(buf));
-   //printf("%s", buf);
+   printf("%s", buf);
 
    sprintf(buf, "Content-Length: %lu\r\n", strlen(body));
    Rio_writen(fd, buf, strlen(buf));
-   //printf("%s", buf);
+   printf("%s", buf);
    
    char buf2[MAXLINE]="";
    printStatistics(buf2, fd);
    sprintf(buf2, "%s\r\n", buf2);
    Rio_writen(fd, buf2, strlen(buf2));
-   //printf("%s", buf2);
+   printf("%s", buf2);
 
    // Write out the content
    Rio_writen(fd, body, strlen(body));
-   //printf("%s", body);
+   printf("%s", body);
 
 }
 
@@ -183,7 +183,7 @@ void requestHandle(int fd)
    Rio_readlineb(&rio, buf, MAXLINE);
    sscanf(buf, "%s %s %s", method, uri, version);
 
-   //printf("%s %s %s\n", method, uri, version);
+   printf("%s %s %s\n", method, uri, version);
 
    if (strcasecmp(method, "GET")) {
       requestError(fd, method, "501", "Not Implemented", "OS-HW3 Server does not implement this method");
